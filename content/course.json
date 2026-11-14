@@ -1,0 +1,22 @@
+[
+  {"id": "start", "title": "Start here", "blurb": "How the course works, the job roles it prepares you for, and the order to study in.",
+   "lessons": ["start-here"]},
+  {"id": "python", "title": "Python in depth", "blurb": "The language from first principles to decorators, generators, classes, typing, async and testing.",
+   "lessons": ["python-core", "python-advanced"]},
+  {"id": "dsa", "title": "Data structures and algorithms", "blurb": "Every core structure and problem pattern with runnable code, traces and interview problems.",
+   "lessons": ["dsa-complexity-arrays", "dsa-hashing-stacks-lists", "dsa-search-sort", "dsa-trees-heaps-tries", "dsa-graphs", "dsa-recursion-dp-greedy"]},
+  {"id": "cs", "title": "Computer science fundamentals", "blurb": "How the operating system and the network actually run your program.",
+   "lessons": ["cs-os-concurrency", "cs-networking"]},
+  {"id": "backend", "title": "Backend engineering", "blurb": "APIs, authentication, databases, caches and queues: everything behind one request.",
+   "lessons": ["be-apis", "be-auth", "be-databases", "be-cache-queues"]},
+  {"id": "sysdesign", "title": "System design", "blurb": "The method, every building block, architecture patterns, and fourteen worked designs.",
+   "lessons": ["sd-method", "sd-building-blocks", "sd-data-at-scale", "sd-patterns", "sd-cases-1", "sd-cases-2", "sd-cases-3", "sd-lld"]},
+  {"id": "devops", "title": "Shipping and running software", "blurb": "Linux, Git, Docker, Kubernetes, CI/CD, cloud, observability, testing and security.",
+   "lessons": ["ops-linux-git", "ops-docker-k8s-cicd", "ops-cloud", "ops-quality"]},
+  {"id": "frontend", "title": "Frontend essentials", "blurb": "How the browser, JavaScript and React work, as much as a backend or AI engineer needs.",
+   "lessons": ["fe-essentials"]},
+  {"id": "ai", "title": "AI and machine learning", "blurb": "Maths, classical ML, deep learning, transformers, LLM APIs, RAG, agents, MCP, fine-tuning and evals.",
+   "lessons": ["ai-maths-data", "ai-classical-ml", "ai-deep-learning", "ai-transformers-llms", "ai-llm-apis", "ai-rag", "ai-agents", "ai-finetune-serving", "ai-evals-ops"]},
+  {"id": "career", "title": "Projects, interviews and resources", "blurb": "What to build, how to prepare, and the best free material for going further.",
+   "lessons": ["career-projects-plan", "career-interviews", "resources"]}
+]

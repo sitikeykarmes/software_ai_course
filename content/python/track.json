@@ -1,0 +1,23 @@
+[
+  {"id": "foundations", "title": "Foundations", "level": "Beginner",
+   "blurb": "Values, variables, decisions and loops: the parts every program is built from.",
+   "lessons": ["py-first-steps", "py-conditions", "py-loops"]},
+  {"id": "data", "title": "Working with data", "level": "Beginner",
+   "blurb": "Strings, lists, tuples, dictionaries and sets, and the comprehension syntax that ties them together.",
+   "lessons": ["py-strings", "py-lists-tuples", "py-dicts-sets", "py-comprehensions"]},
+  {"id": "functions", "title": "Functions", "level": "Intermediate",
+   "blurb": "Writing your own functions, passing functions around, and solving problems recursively.",
+   "lessons": ["py-functions", "py-functional", "py-recursion"]},
+  {"id": "reliable", "title": "Reliable programs", "level": "Intermediate",
+   "blurb": "Handling errors on purpose and reading and writing real data formats.",
+   "lessons": ["py-errors", "py-files-data"]},
+  {"id": "objects", "title": "Objects and classes", "level": "Intermediate",
+   "blurb": "Modelling things with classes, special methods, inheritance and dataclasses.",
+   "lessons": ["py-classes", "py-inheritance-dataclasses"]},
+  {"id": "advanced", "title": "Advanced Python", "level": "Advanced",
+   "blurb": "Generators, decorators, context managers, type hints, testing and concurrency.",
+   "lessons": ["py-iterators-generators", "py-decorators-context", "py-modern-python"]},
+  {"id": "sets", "title": "Problem sets", "level": "Interview practice",
+   "blurb": "Classic interview problems, shared with the data structures lessons of the main course.",
+   "lessons": ["py-set-arrays-strings", "py-set-hashing-stacks", "py-set-search-recursion"]}
+]

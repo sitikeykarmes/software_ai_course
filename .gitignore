@@ -1,0 +1,8 @@
+.env
+.runs/
+progress.json
+progress.tmp
+__pycache__/
+*.pyc
+site/
+.claude/settings.local.json

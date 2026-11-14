@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Python Lab</title>
+<link rel="stylesheet" href="/static/py.css">
+</head>
+<body>
+<a class="skip" href="#app">Skip to content</a>
+<header class="nav">
+  <a class="brand" href="#/"><span class="mark" aria-hidden="true">Py</span><span>Python Lab</span></a>
+  <nav class="nav-links" aria-label="Sections">
+    <a href="#/" data-nav="learn">Learn</a>
+    <a href="#/problems" data-nav="problems">Problems</a>
+  </nav>
+  <span class="grow"></span>
+  <span class="nav-stat" id="nav-solved" title="Problems solved"></span>
+  <span class="nav-stat" id="nav-streak" title="Days in a row with a solved problem or finished lesson"></span>
+  <button type="button" class="btn sm" id="theme-btn">Theme</button>
+  <a class="btn sm" href="/">Main course</a>
+</header>
+<main id="app" class="app" tabindex="-1"></main>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="/python.js"></script>
+<script src="/static/py.js"></script>
+</body>
+</html>

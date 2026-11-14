@@ -1,0 +1,18 @@
+# Cloudflare Worker settings for the optional tutor proxy (deploy/tutor-proxy.js).
+# Deploy from this folder:  npx wrangler secret put GROQ_API_KEY   then   npx wrangler deploy
+name = "course-tutor"
+main = "tutor-proxy.js"
+compatibility_date = "2025-06-01"
+
+[vars]
+# The address of your hosted site, without a trailing slash. Separate several with commas.
+ALLOWED_ORIGINS = "https://YOUR-NAME.github.io"
+
+# At most 20 tutor requests per minute from one visitor (IP address).
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60

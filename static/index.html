@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Software and AI Engineering</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to lesson</a>
+<div id="read-progress" aria-hidden="true"></div>
+<header class="topbar">
+  <button id="menu-btn" class="btn sm icon-btn" type="button" aria-controls="sidebar-nav" aria-expanded="false">Lessons</button>
+  <a class="brand" href="#home"><span class="mark" aria-hidden="true">SE</span><span class="brand-text">Software and AI Engineering</span></a>
+  <nav class="top-links" aria-label="Sites">
+    <a href="#home" class="on" aria-current="page">Course</a>
+    <a href="/python" class="lab-entry" title="A separate Python track with a full code editor and test cases">Python Lab</a>
+  </nav>
+  <span class="grow"></span>
+  <span class="nav-stat" id="nav-streak" title="Days in a row with a finished lesson, quiz or task"></span>
+  <span class="nav-stat overall" aria-live="polite"><span id="overall-text"></span><span class="bar"><span id="overall-bar"></span></span></span>
+  <button id="theme-btn" class="btn sm" type="button" title="Switch between light and dark">Theme</button>
+</header>
+<div class="layout">
+  <nav id="sidebar-nav" class="side" aria-label="Course lessons">
+    <label class="search-label" for="search-input">Search all lessons <kbd>/</kbd></label>
+    <input id="search-input" type="search" placeholder="For example: consistent hashing" autocomplete="off">
+    <div id="nav-list"></div>
+    <p class="credit">Developed by Kartik</p>
+  </nav>
+  <main id="main" tabindex="-1"></main>
+  <aside id="toc" class="toc" aria-label="On this page"></aside>
+</div>
+<button id="tutor-fab" class="btn tutor-fab" type="button" aria-controls="tutor" aria-expanded="false">Tutor</button>
+<section id="tutor" class="tutor" aria-label="Tutor" hidden>
+  <header><strong>Tutor</strong><span id="tutor-status" class="tutor-status"></span>
+    <button id="tutor-clear" type="button" class="btn sm ghost" title="Clear the conversation">Clear</button>
+    <button id="tutor-close" type="button" class="btn sm ghost" aria-label="Close the tutor">Close</button></header>
+  <div id="tutor-msgs" class="tutor-msgs" aria-live="polite"></div>
+  <div class="tutor-chips">
+    <button type="button" class="btn sm" data-q="Explain this lesson in simple words with one example.">Explain this lesson</button>
+    <button type="button" class="btn sm" data-q="Quiz me with 3 questions on this lesson, one at a time.">Quiz me</button>
+    <button type="button" class="btn sm" data-q="Give me one new practice challenge for this lesson.">Give me a challenge</button>
+  </div>
+  <form id="tutor-form" class="tutor-form"><textarea id="tutor-input" rows="2" placeholder="Ask about this lesson" aria-label="Message to the tutor"></textarea><button class="btn primary" type="submit">Send</button></form>
+</section>
+<button id="to-top" class="btn sm to-top" type="button" aria-label="Back to top" hidden>Top</button>
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<script src="/course.js"></script>
+<script src="/static/sims.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
