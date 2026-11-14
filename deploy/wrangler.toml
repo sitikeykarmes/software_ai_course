@@ -14,7 +14,7 @@ ALLOWED_ORIGINS = "https://sitikeykarmes.github.io"
 # Progress sync storage. The id comes from `npx wrangler kv namespace create SYNC`. Leave this block out to turn sync off.
 [[kv_namespaces]]
 binding = "SYNC"
-id = "REPLACE-WITH-THE-KV-NAMESPACE-ID"
+id = "d6595fe6bb5a45e8b7f45608eac3d445"
 
 # At most 20 tutor requests per minute from one visitor (IP address).
 [[ratelimits]]
