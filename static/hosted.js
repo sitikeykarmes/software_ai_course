@@ -4,13 +4,15 @@
      /api/state, /api/progress, /api/progress-patch
                                progress is kept in this browser's localStorage (Settings has Export and Import)
      /api/tutor                the Groq API, with the visitor's own key, or through the site's tutor proxy
+   With a sync server (--sync-url), signing in with an ID and password also keeps the progress in sync between devices.
    It loads after course.js / python.js and before app.js / py.js. */
 (function () {
   'use strict';
   var H = window.HOSTED || {};
   var PROMPTS = H.prompts || {};
   var LIMIT = H.timeout || 10, MAX_OUT = H.maxOutput || 20000;
-  var STORE = 'sae-progress', KEY_STORE = 'sae-groq-key';
+  var STORE = 'sae-progress', KEY_STORE = 'sae-groq-key', SYNC_STORE = 'sae-sync', ASKED = 'sae-sync-asked';
+  var SYNC = H.sync ? String(H.sync).replace(/\/+$/, '') : '';
   var LAB_ONLY = ['pydone', 'pylast'];
   var PATCHABLE = ['checks', 'drafts', 'pydone', 'pylast', 'streak', 'theme'];
   var here = document.currentScript ? document.currentScript.src : location.href;
@@ -29,10 +31,10 @@
   function writeProgress(data) {   // the main course saves everything; keys owned by the Python Lab stay as stored
     var cur = load();
     LAB_ONLY.forEach(function (k) { delete data[k]; if (k in cur) data[k] = cur[k]; });
-    return save(data);
+    return replaceAll(cur, data);
   }
   function patchProgress(section, key, value) {
-    var data = load();
+    var before = load(), data = load();
     if (key === null || key === undefined) {
       if (value === null || value === undefined) delete data[section]; else data[section] = value;
     } else {
@@ -40,7 +42,161 @@
       if (!b || typeof b !== 'object' || Array.isArray(b)) b = data[section] = {};
       if (value === null || value === undefined) delete b[key]; else b[key] = value;
     }
-    return save(data);
+    return replaceAll(before, data);
+  }
+  function replaceAll(before, data) {   // every change made on this page goes through here
+    if (!save(data)) return false;
+    var s = getSync();
+    if (s) { diffPaths(before, data, s.dirty); setSync(s); syncSoon(); }
+    return true;
+  }
+
+  /* ---------- progress sync between devices (signed in with an ID) ----------
+     Kept in localStorage under sae-sync: { id, auth, rev, dirty, adopt, at, error }.
+       auth   a key made from the password in this browser (PBKDF2); the server stores only a hash of it
+       rev    the server's revision this browser last had
+       dirty  entries changed here and not yet saved to the ID, as "section" or "section\nkey" paths
+       adopt  goes up when newer progress from the ID is taken in; other open tabs then reload
+     Pages keep their progress in memory and save all of it, so after taking in newer progress the page reloads. */
+  function isObj(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+  function hasKeys(o) { return isObj(o) && Object.keys(o).length > 0; }
+  function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+  var WHOLE = { streak: 1 };   // values that are replaced as a whole, never combined entry by entry
+  function getSync() {
+    try { var s = JSON.parse(readLocal(SYNC_STORE) || 'null'); } catch (e) { return null; }
+    if (!SYNC || !isObj(s) || !s.id || !s.auth) return null;
+    if (!isObj(s.dirty)) s.dirty = {};
+    return s;
+  }
+  function setSync(s) { writeLocal(SYNC_STORE, s ? JSON.stringify(s) : null); }
+  function diffPaths(a, b, into) {   // which entries differ between two progress objects
+    a = isObj(a) ? a : {}; b = isObj(b) ? b : {};
+    Object.keys(Object.assign({}, a, b)).forEach(function (k) {
+      var x = a[k], y = b[k];
+      if (same(x, y)) return;
+      if (isObj(x) && isObj(y) && !WHOLE[k]) {
+        Object.keys(Object.assign({}, x, y)).forEach(function (s) { if (!same(x[s], y[s])) into[k + '\n' + s] = 1; });
+      } else into[k] = 1;
+    });
+    return into;
+  }
+  function applyPaths(base, local, paths) {   // the server's progress with this browser's unsaved changes on top
+    var out = JSON.parse(JSON.stringify(isObj(base) ? base : {}));
+    Object.keys(paths).forEach(function (p) {
+      var i = p.indexOf('\n');
+      if (i < 0) { if (p in local) out[p] = local[p]; else delete out[p]; return; }
+      var k = p.slice(0, i), sub = p.slice(i + 1);
+      if (isObj(local[k]) && sub in local[k]) { if (!isObj(out[k])) out[k] = {}; out[k][sub] = local[k][sub]; }
+      else if (isObj(out[k])) delete out[k][sub];
+    });
+    return out;
+  }
+  function mergeIn(server, local) {   // signing in: the ID's progress wins; entries only this browser has are added
+    var out = JSON.parse(JSON.stringify(server));
+    Object.keys(local).forEach(function (k) {
+      if (!(k in out)) out[k] = local[k];
+      else if (isObj(out[k]) && isObj(local[k]) && !WHOLE[k]) {
+        Object.keys(local[k]).forEach(function (sub) { if (!(sub in out[k])) out[k][sub] = local[k][sub]; });
+      }
+    });
+    return out;
+  }
+  function syncCall(op, body, keepalive) {
+    var opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+    if (keepalive && opts.body.length < 60000) opts.keepalive = true;   // lets the save finish while the tab closes
+    return fetchReal(SYNC + '/sync/' + op, opts).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (d) { d = isObj(d) ? d : {}; d.status = r.status; return d; });
+    });
+  }
+  var pushing = false, pushTimer = null, lastPull = 0, tabAdopt = 0;
+  function syncSoon(ms) { clearTimeout(pushTimer); pushTimer = setTimeout(push, ms === undefined ? 30000 : ms); }
+  function push(keepalive) {   // save this browser's changes to the ID
+    var s = getSync();
+    if (!s || pushing || !hasKeys(s.dirty)) return Promise.resolve();
+    pushing = true; clearTimeout(pushTimer);
+    var data = load();
+    return syncCall('save', { id: s.id, auth: s.auth, base: s.rev || 0, data: data }, keepalive).then(function (r) {
+      pushing = false;
+      var now = getSync();
+      if (!now || now.id !== s.id) return;
+      if (r.status === 200) {
+        now.rev = r.rev; now.at = Date.now(); now.error = '';
+        now.dirty = diffPaths(data, load(), {});   // anything changed while this save was on its way is still unsaved
+        setSync(now); refreshAccount();
+        if (hasKeys(now.dirty)) syncSoon();
+        return;
+      }
+      if (r.status === 409 && r.rev > (now.rev || 0)) return adopt(now, r.rev, r.data);   // another device saved first
+      now.error = r.error || ('HTTP ' + r.status); setSync(now); refreshAccount();
+      if (r.status !== 403 && r.status !== 404) syncSoon(60000);
+    }, function () {
+      pushing = false;
+      var now = getSync();
+      if (now) { now.error = 'Could not reach the sync server. Changes are kept here and saved later.'; setSync(now); refreshAccount(); }
+      syncSoon(60000);
+    });
+  }
+  function adopt(s, rev, serverData) {   // take in newer progress from the ID, keeping changes not yet saved from here
+    var local = load(), server = isObj(serverData) ? serverData : {};
+    var merged = hasKeys(s.dirty) ? applyPaths(server, local, s.dirty) : server;
+    s.rev = rev; s.at = Date.now(); s.error = ''; s.dirty = diffPaths(server, merged, {});
+    s.adopt = (s.adopt || 0) + 1; tabAdopt = s.adopt;
+    setSync(s);
+    var changed = !same(merged, local);
+    if (changed) { status('Loading your progress from your ID.'); save(merged); }
+    return push(true).then(function () { if (changed) location.reload(); });
+  }
+  function pull() {   // fetch the ID's progress; take it in when it is newer than what this browser has
+    var s = getSync();
+    if (!s) return Promise.resolve();
+    lastPull = Date.now();
+    return syncCall('load', { id: s.id, auth: s.auth }).then(function (r) {
+      var now = getSync();
+      if (!now || now.id !== s.id) return;
+      if (r.status !== 200) { now.error = r.error || ('HTTP ' + r.status); setSync(now); refreshAccount(); return; }
+      if (r.rev > (now.rev || 0)) return adopt(now, r.rev, r.data);
+      if (now.error) { now.error = ''; setSync(now); refreshAccount(); }
+      if (hasKeys(now.dirty)) return push();
+    }, function () { /* offline: keep working in this browser; changes are saved to the ID later */ });
+  }
+  function deriveAuth(id, password) {
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']).then(function (k) {
+      return crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode('course-sync/v1/' + id), iterations: 200000 }, k, 256);
+    }).then(function (bits) {
+      return Array.prototype.map.call(new Uint8Array(bits), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    });
+  }
+  function signIn(id, password, create) {
+    return deriveAuth(id, password).then(function (auth) {
+      var local = load();
+      if (create) {
+        return syncCall('save', { id: id, auth: auth, base: 0, create: true, data: local }).then(function (r) {
+          if (r.status === 409) throw new Error('This ID is already taken. Choose another one, or sign in if it is yours.');
+          if (r.status !== 200) throw new Error(r.error || 'The sync server answered with HTTP ' + r.status + '.');
+          setSync({ id: id, auth: auth, rev: r.rev, dirty: {}, adopt: 0, at: Date.now(), error: '' });
+        });
+      }
+      return syncCall('load', { id: id, auth: auth }).then(function (r) {
+        if (r.status === 404) throw new Error('No progress is saved under this ID. Check the spelling, or use Create new ID.');
+        if (r.status === 403) throw new Error('Wrong password for this ID.');
+        if (r.status !== 200) throw new Error(r.error || 'The sync server answered with HTTP ' + r.status + '.');
+        var server = isObj(r.data) ? r.data : {}, merged = mergeIn(server, local);
+        setSync({ id: id, auth: auth, rev: r.rev, dirty: diffPaths(server, merged, {}), adopt: 0, at: Date.now(), error: '' });
+        save(merged);
+        return push(true);
+      });
+    }, function () { throw new Error('This browser cannot create the sign-in key. Use an up-to-date browser.'); });
+  }
+  function signOut() {
+    var s = getSync();
+    if (!s) return;
+    if (!confirm('Sign out of "' + s.id + '"? The progress in this browser is removed; it stays saved in your ID.')) return;
+    push(true).catch(function () {}).then(function () {
+      var now = getSync();
+      if (now && hasKeys(now.dirty) && !confirm('Some changes could not be saved to your ID yet (no connection?). Sign out and lose them?')) return;
+      setSync(null); writeLocal(STORE, null); location.reload();
+    });
   }
 
   /* ---------- Python in a Web Worker ---------- */
@@ -188,7 +344,7 @@
     }
     var key = readLocal(KEY_STORE);
     if (!key) {
-      openSettings(true);
+      openSettings('#hs-key');
       return Promise.resolve({ error: 'To use the tutor, add your Groq API key in Settings (top bar). It stays in this browser.' });
     }
     return postJSON('https://api.groq.com/openai/v1/chat/completions', { Authorization: 'Bearer ' + key }, {
@@ -260,8 +416,9 @@
         '<p class="hs-note">Use this only on your own device. Anyone using this browser profile could read the key.</p>';
     dlg.innerHTML =
       '<div class="hs-head"><h2 id="hs-title">Settings</h2><button type="button" class="btn sm ghost" id="hs-close">Close</button></div>' +
+      (SYNC ? '<section><h3>Your ID</h3><div id="hs-account"></div></section>' : '') +
       '<section><h3>Tutor</h3>' + tutor + '</section>' +
-      '<section><h3>Progress</h3><p>Your progress and drafts are saved in this browser only. To continue on another device, export them here and import the file there.</p>' +
+      '<section><h3>Progress</h3><p id="hs-progress-note"></p>' +
       '<div class="hs-row"><button type="button" id="hs-export" class="btn sm">Export</button><button type="button" id="hs-import" class="btn sm">Import</button>' +
       '<span class="grow"></span><button type="button" id="hs-reset" class="btn sm ghost hs-danger">Reset all</button>' +
       '<input type="file" id="hs-file" accept=".json,application/json" hidden></div></section>' +
@@ -295,21 +452,90 @@
       f.text().then(function (text) {
         var data = JSON.parse(text);
         if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a progress file');
-        if (!confirm('Replace the progress saved in this browser with the contents of ' + f.name + '?')) return;
-        save(data); location.reload();
-      }).catch(function () { alert('That file is not a progress file exported from this course.'); });
+        var where = getSync() ? 'this browser and in your ID "' + getSync().id + '"' : 'this browser';
+        if (!confirm('Replace the progress saved in ' + where + ' with the contents of ' + f.name + '?')) return;
+        replaceAll(load(), data);
+        return push(true).then(function () { location.reload(); });
+      }, function () { throw new Error('unreadable'); }).catch(function () { alert('That file is not a progress file exported from this course.'); });
     });
     dlg.querySelector('#hs-reset').addEventListener('click', function () {
-      if (!confirm('Delete all progress, drafts and solved problems saved in this browser? Export first if you want to keep a copy.')) return;
-      writeLocal(STORE, null); location.reload();
+      var s = getSync();
+      if (!confirm(s ? 'Delete all progress, drafts and solved problems in this browser and in your ID "' + s.id + '", on every device? Export first if you want to keep a copy.'
+                     : 'Delete all progress, drafts and solved problems saved in this browser? Export first if you want to keep a copy.')) return;
+      if (!s) { writeLocal(STORE, null); location.reload(); return; }
+      replaceAll(load(), {});
+      push(true).then(function () { location.reload(); });
     });
   }
-  function openSettings(focusKey) {
+  function fmtTime(ms) {
+    var d = new Date(ms);
+    return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleString();
+  }
+  function accountState(s) {
+    if (s.error) return 'Not saved: ' + s.error;
+    if (hasKeys(s.dirty)) return 'Some changes are waiting to be saved to your ID.';
+    return s.at ? 'All progress is saved to your ID (last update ' + fmtTime(s.at) + ').' : '';
+  }
+  function refreshAccount() {   // update the status line while the dialog is open
+    var s = getSync(), line = dlg && dlg.querySelector('#hs-account-state');
+    if (s && line) line.textContent = accountState(s);
+  }
+  function renderAccount() {
+    var box = dlg && dlg.querySelector('#hs-account'), note = dlg && dlg.querySelector('#hs-progress-note');
+    var s = getSync();
+    if (note) note.textContent = s ? 'Your progress and drafts are saved in this browser and to your ID, so they appear on every device where you sign in. Export makes a file copy.'
+      : 'Your progress and drafts are saved in this browser only.' + (SYNC ? ' Sign in with an ID above to use them on other devices, or' : ' To continue on another device,') + ' export them here and import the file there.';
+    if (!box) return;
+    if (s) {
+      box.innerHTML = '<p>Signed in as <b>' + esc(s.id) + '</b>. Sign in with the same ID and password on another device to continue there.</p>' +
+        '<p id="hs-account-state" class="hs-note" role="status"></p>' +
+        '<div class="hs-row"><button type="button" id="hs-sync-now" class="btn sm">Save now</button><span class="grow"></span>' +
+        '<button type="button" id="hs-signout" class="btn sm ghost">Sign out</button></div>';
+      refreshAccount();
+      box.querySelector('#hs-sync-now').addEventListener('click', function () {
+        var line = box.querySelector('#hs-account-state'); line.textContent = 'Saving...';
+        pull().then(function () { return push(); }).then(refreshAccount, refreshAccount);
+      });
+      box.querySelector('#hs-signout').addEventListener('click', signOut);
+      return;
+    }
+    box.innerHTML = '<p>Sign in with an ID and password to keep the same progress on all your devices. Without one, progress stays in this browser only.</p>' +
+      '<form id="hs-account-form" autocomplete="on">' +
+      '<div class="hs-row"><input id="hs-id" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ID, for example kartik" aria-label="ID">' +
+      '<input id="hs-pw" name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password"></div>' +
+      '<div class="hs-row" id="hs-pw2-row" hidden><input id="hs-pw2" type="password" autocomplete="new-password" placeholder="Repeat the password" aria-label="Repeat the password"></div>' +
+      '<div class="hs-row"><button type="submit" id="hs-signin" class="btn sm primary">Sign in</button><button type="button" id="hs-create" class="btn sm">Create new ID</button></div>' +
+      '</form><p id="hs-account-msg" class="hs-note" role="status"></p>' +
+      '<p class="hs-note">IDs use 3 to 40 letters, digits, dots, dashes or underscores. Passwords need at least 8 characters. There is no password reset, so keep it somewhere safe.</p>';
+    var form = box.querySelector('#hs-account-form'), msg = box.querySelector('#hs-account-msg');
+    var idIn = box.querySelector('#hs-id'), pwIn = box.querySelector('#hs-pw'), pw2Row = box.querySelector('#hs-pw2-row'), pw2In = box.querySelector('#hs-pw2');
+    var buttons = [box.querySelector('#hs-signin'), box.querySelector('#hs-create')];
+    function go(create) {
+      var id = idIn.value.trim().toLowerCase(), pw = pwIn.value;
+      if (!/^[a-z0-9][a-z0-9._-]{2,39}$/.test(id)) { msg.textContent = 'The ID needs 3 to 40 letters, digits, dots, dashes or underscores.'; idIn.focus(); return; }
+      if (pw.length < 8) { msg.textContent = 'The password needs at least 8 characters.'; pwIn.focus(); return; }
+      if (create && pw2Row.hidden) { pw2Row.hidden = false; msg.textContent = 'Repeat the password, then click Create new ID again.'; pw2In.focus(); return; }
+      if (create && pw2In.value !== pw) { msg.textContent = 'The two passwords are different.'; pw2In.focus(); return; }
+      buttons.forEach(function (b) { b.disabled = true; });
+      msg.textContent = create ? 'Creating your ID...' : 'Signing in...';
+      signIn(id, pw, create).then(function () {
+        msg.textContent = 'Done. Loading your progress...';
+        location.reload();
+      }, function (err) {
+        buttons.forEach(function (b) { b.disabled = false; });
+        msg.textContent = err && err.message && !/fetch|network/i.test(err.message) ? err.message : 'Could not reach the sync server. Check the internet connection.';
+      });
+    }
+    form.addEventListener('submit', function (e) { e.preventDefault(); go(false); });
+    box.querySelector('#hs-create').addEventListener('click', function () { go(true); });
+  }
+  function openSettings(focusSel) {
     if (!dlg) buildSettings();
     if (!H.proxy) keyState();
+    renderAccount();
     updatePyInfo();
     if (!dlg.open) dlg.showModal();
-    var k = focusKey && dlg.querySelector('#hs-key');
+    var k = focusSel && dlg.querySelector(focusSel);
     if (k) k.focus();
   }
   var theme = document.getElementById('theme-btn');
@@ -317,7 +543,29 @@
     var btn = document.createElement('button');
     btn.type = 'button'; btn.className = 'btn sm'; btn.id = 'settings-btn'; btn.textContent = 'Settings';
     btn.title = 'Tutor key, progress export and import';
-    btn.addEventListener('click', function () { openSettings(false); });
+    btn.addEventListener('click', function () { openSettings(''); });
     theme.parentNode.insertBefore(btn, theme);
+  }
+
+  /* ---------- sync: start-up and keeping up with other devices and tabs ---------- */
+  if (SYNC) {
+    var first = getSync();
+    tabAdopt = first ? first.adopt || 0 : 0;
+    if (first) pull();
+    else if (!readLocal(ASKED)) {   // a new browser: ask for an ID once
+      writeLocal(ASKED, '1');
+      window.addEventListener('load', function () { openSettings('#hs-id'); });
+    }
+    var back = function () {
+      var s = getSync();
+      if (!s) return;
+      if ((s.adopt || 0) !== tabAdopt) { location.reload(); return; }   // another tab took in newer progress
+      if (Date.now() - lastPull > 15000) pull();
+    };
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') push(true); else back();
+    });
+    window.addEventListener('pagehide', function () { push(true); });
   }
 })();

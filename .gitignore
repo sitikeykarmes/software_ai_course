@@ -6,3 +6,6 @@ __pycache__/
 *.pyc
 site/
 .claude/settings.local.json
+deploy/.wrangler/
+deploy/.dev.vars
+node_modules/

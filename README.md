@@ -100,7 +100,7 @@ Instead of typing these each time, put them in the `.env` file next to `app.py` 
 | Part | Local (`python app.py`) | Hosted (`site/`) |
 | --- | --- | --- |
 | Running code, tests, Submit | Your Python, on your machine | Python 3.12 inside the visitor's browser ([Pyodide](https://pyodide.org)), in a background worker with the same 10-second limit. Nothing runs on a server |
-| Progress and drafts | `progress.json` | The browser's storage. **Settings > Export / Import** moves it to another device |
+| Progress and drafts | `progress.json` | The browser's storage. With the optional sync server, **Settings > Your ID** keeps it the same on every device; otherwise **Settings > Export / Import** moves it |
 | Tutor | `COURSE_LLM` and `.env` | Groq (`openai/gpt-oss-120b`): each visitor pastes their own key in **Settings**, or you run the optional tutor proxy so nobody needs a key |
 
 The first Run downloads Python (about 10 MB, then cached by the browser), so the hosted site needs internet access. Packages such as NumPy are downloaded the first time a program imports them.
@@ -119,17 +119,23 @@ Run `python app.py --build site`, then drag the `site` folder onto Netlify Drop 
 
 To try the built site on your own machine first: `python -m http.server 8080 --bind 127.0.0.1 -d site`, then open `http://127.0.0.1:8080/`. Opening `index.html` as a file does not work, because browsers do not start a Python worker from `file://`.
 
-### The tutor online
+### The optional server: tutor proxy and progress sync
 
-The hosted site is public files, so it must never contain your API key. `--build` does not read `.env`. There are two ways:
+The hosted site is public files, so it must never contain your API key, and it cannot store anything by itself. `deploy/tutor-proxy.js` is a small Cloudflare Worker (free plan) that adds both, each optional:
 
-- **Each visitor's own key (default).** Settings has a field for a Groq API key. It is kept only in that browser and sent only to `api.groq.com`. Fine when the site is mainly for you.
-- **A tutor proxy (nobody needs a key).** `deploy/tutor-proxy.js` is a small Cloudflare Worker (free plan) that keeps your Groq key as a secret and answers only your site:
-  1. In `deploy/wrangler.toml`, set `ALLOWED_ORIGINS` to your site's address, for example `https://your-name.github.io`.
-  2. From the `deploy` folder: `npx wrangler secret put GROQ_API_KEY`, then `npx wrangler deploy`. Note the `https://....workers.dev` address it prints.
-  3. Build with `python app.py --build site --tutor-proxy https://course-tutor.<you>.workers.dev`. On GitHub Pages, add that address as the repository variable `TUTOR_PROXY_URL` (**Settings > Secrets and variables > Actions > Variables**) instead.
+- **Tutor proxy (nobody needs a key).** It keeps your Groq key as a secret. Without it, each visitor pastes their own Groq key in Settings; that key stays in their browser and is sent only to `api.groq.com`. `--build` never reads `.env`.
+- **Progress sync.** Settings asks for an ID and password. Progress is saved to that ID in Workers KV (about 30 seconds after a change, and when the tab is left), and appears on every device where you sign in. Changes made on two devices before syncing are combined. The password is turned into a key in the browser (PBKDF2), so the Worker never sees it, and it stores only a hash of that key. There is no password reset.
 
-  Anyone who finds the site can use the tutor, and so spend your Groq quota. The proxy allows 20 requests per minute per visitor; also set a usage limit for the key in the Groq console.
+Setup, from the `deploy` folder (needs Node.js and a free Cloudflare account):
+
+1. In `wrangler.toml`, set `ALLOWED_ORIGINS` to your site's origin, for example `https://your-name.github.io` (no path).
+2. `npx wrangler login`
+3. `npx wrangler kv namespace create SYNC`, and copy the printed `id` into the `[[kv_namespaces]]` block of `wrangler.toml`. Skip this and delete that block if you only want the tutor proxy.
+4. `npx wrangler secret put GROQ_API_KEY` and type your key when asked. Skip this if you only want sync.
+5. `npx wrangler deploy`. Note the `https://course-tutor.<you>.workers.dev` address it prints.
+6. On GitHub Pages, add that address as the repository variables `TUTOR_PROXY_URL` and/or `SYNC_URL` (**Settings > Secrets and variables > Actions > Variables**), then re-run the "Publish site" workflow. Elsewhere, build with `python app.py --build site --tutor-proxy <address> --sync-url <address>`.
+
+Anyone who finds the site can use the tutor, and so spend your Groq quota. The Worker allows 20 tutor requests per minute per visitor; also set a usage limit for the key in the Groq console. To test locally: `npx wrangler dev --port 8787 --var ALLOWED_ORIGINS:http://127.0.0.1:8080`, then build with `--sync-url http://127.0.0.1:8787`.
 
 ## Safety notes
 

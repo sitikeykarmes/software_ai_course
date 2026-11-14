@@ -11,8 +11,9 @@ dialog.hs::backdrop { background: rgba(10, 12, 15, .45); }
 .hs code { font-family: var(--mono); font-size: .85em; background: var(--raised); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .hs .hs-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
 .hs .hs-row .grow { flex: 1; }
-.hs input[type="password"] { flex: 1; min-width: 180px; font: inherit; font-size: .88rem; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
-.hs input[type="password"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hs form { margin: 0; }
+.hs input[type="password"], .hs input[type="text"] { flex: 1; min-width: 180px; font: inherit; font-size: .88rem; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+.hs input[type="password"]:focus, .hs input[type="text"]:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .hs .hs-note { font-size: .82rem; color: var(--muted); margin-bottom: 4px; }
 .hs .hs-danger { color: var(--bad); }
 .py-status { position: fixed; left: 16px; bottom: 16px; z-index: 70; max-width: calc(100vw - 32px); font-size: .84rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 8px 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, .08); }

@@ -1,6 +1,7 @@
 # Publishes the hosted version of the course to GitHub Pages on every push to main.
 # In the repository: Settings > Pages > Source: "GitHub Actions".
-# Optional: Settings > Secrets and variables > Actions > Variables > TUTOR_PROXY_URL = your tutor proxy address.
+# Optional: Settings > Secrets and variables > Actions > Variables:
+#   TUTOR_PROXY_URL = your tutor proxy address;  SYNC_URL = your progress sync address (often the same worker).
 name: Publish site
 
 on:
@@ -26,7 +27,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build the static site
-        run: python app.py --build site --tutor-proxy "${{ vars.TUTOR_PROXY_URL }}"
+        run: python app.py --build site --tutor-proxy "${{ vars.TUTOR_PROXY_URL }}" --sync-url "${{ vars.SYNC_URL }}"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

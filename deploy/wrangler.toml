@@ -1,12 +1,20 @@
-# Cloudflare Worker settings for the optional tutor proxy (deploy/tutor-proxy.js).
-# Deploy from this folder:  npx wrangler secret put GROQ_API_KEY   then   npx wrangler deploy
+# Cloudflare Worker settings for the optional server (deploy/tutor-proxy.js): tutor proxy and progress sync.
+# Deploy from this folder (see README.md, "Host it online"):
+#   npx wrangler kv namespace create SYNC    then copy the printed id below
+#   npx wrangler secret put GROQ_API_KEY
+#   npx wrangler deploy
 name = "course-tutor"
 main = "tutor-proxy.js"
 compatibility_date = "2025-06-01"
 
 [vars]
-# The address of your hosted site, without a trailing slash. Separate several with commas.
-ALLOWED_ORIGINS = "https://YOUR-NAME.github.io"
+# The address of your hosted site: origin only (no path), no trailing slash. Separate several with commas.
+ALLOWED_ORIGINS = "https://sitikeykarmes.github.io"
+
+# Progress sync storage. The id comes from `npx wrangler kv namespace create SYNC`. Leave this block out to turn sync off.
+[[kv_namespaces]]
+binding = "SYNC"
+id = "REPLACE-WITH-THE-KV-NAMESPACE-ID"
 
 # At most 20 tutor requests per minute from one visitor (IP address).
 [[ratelimits]]
@@ -15,4 +23,13 @@ namespace_id = "1001"
 
   [ratelimits.simple]
   limit = 20
+  period = 60
+
+# At most 60 sync requests per minute from one visitor (slows down password guessing).
+[[ratelimits]]
+name = "SYNC_LIMITER"
+namespace_id = "1002"
+
+  [ratelimits.simple]
+  limit = 60
   period = 60

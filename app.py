@@ -755,23 +755,30 @@ BUILD_LINKS = [
 ]
 
 
-def build_site(out, tutor_proxy="", model=HOSTED_MODEL):
+def server_url(url, flag):
+    """An https:// address, or http:// on this machine (for testing with `npx wrangler dev`)."""
+    url = url.strip().rstrip("/")
+    if url and not (url.startswith("https://") or re.match(r"http://(127\.0\.0\.1|localhost)(:\d+)?$", url)):
+        raise ValueError("%s must be an https:// address" % flag)
+    return url
+
+
+def build_site(out, tutor_proxy="", model=HOSTED_MODEL, sync_url=""):
     """Write a folder of plain files that any static web host can serve."""
     out = Path(out).resolve()
     if out == ROOT or out in ROOT.parents or out in (CONTENT, STATIC):
         raise ValueError("choose a separate output folder, for example: --build site")
+    tutor_proxy, sync_url = server_url(tutor_proxy, "--tutor-proxy"), server_url(sync_url, "--sync-url")
     if out.exists():
         if not (out / BUILD_MARK).exists() and any(out.iterdir()):
             raise ValueError("%s is not empty and was not made by --build; refusing to replace it" % out)
         shutil.rmtree(str(out))
-    if tutor_proxy and not tutor_proxy.startswith("https://"):
-        raise ValueError("--tutor-proxy must be an https:// address")
     course = load_course()
     track = load_track(course)
     lab_keys = sorted(k for k, p in track["problems"].items() if p["shared"])
     for lesson in track["lessons"].values():
         lesson.pop("source", None)
-    hosted = {"proxy": tutor_proxy, "model": model, "timeout": RUN_TIMEOUT, "maxOutput": MAX_OUTPUT,
+    hosted = {"proxy": tutor_proxy, "sync": sync_url, "model": model, "timeout": RUN_TIMEOUT, "maxOutput": MAX_OUTPUT,
               "prompts": {"base": TUTOR_BASE, "check": CHECK_RULES, "hint": HINT_RULES}}
     tutor = {"backend": "groq", "model": model}
     shutil.copytree(str(STATIC), str(out / "static"), ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
@@ -797,6 +804,8 @@ def build_site(out, tutor_proxy="", model=HOSTED_MODEL):
                                                               size / 1e6))
     print("Tutor: %s." % ("through the proxy " + tutor_proxy if tutor_proxy
                           else "each visitor adds their own Groq API key in Settings"))
+    print("Progress: %s." % ("kept in the browser, and synced between devices for signed-in IDs through " + sync_url
+                             if sync_url else "kept in each browser (Settings has Export and Import)"))
     print("Upload the folder to any static host, or test it with:  python -m http.server 8080 --bind 127.0.0.1 -d %s"
           % out.name)
 
@@ -813,10 +822,12 @@ def main():
     parser.add_argument("--tutor-proxy", default="", metavar="URL",
                         help="with --build: the tutor proxy address (see deploy/tutor-proxy.js)")
     parser.add_argument("--tutor-model", default=HOSTED_MODEL, help="with --build: the Groq model for the tutor")
+    parser.add_argument("--sync-url", default="", metavar="URL",
+                        help="with --build: the progress sync server, so an ID keeps progress across devices (see deploy/tutor-proxy.js)")
     args = parser.parse_args()
     if args.build:
         try:
-            build_site(args.build, args.tutor_proxy.strip(), args.tutor_model)
+            build_site(args.build, args.tutor_proxy, args.tutor_model, args.sync_url)
         except (OSError, ValueError) as exc:
             sys.exit("Build failed: %s" % exc)
         return
