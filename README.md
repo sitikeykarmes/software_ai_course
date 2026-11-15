@@ -100,7 +100,7 @@ Instead of typing these each time, put them in the `.env` file next to `app.py` 
 | Part | Local (`python app.py`) | Hosted (`site/`) |
 | --- | --- | --- |
 | Running code, tests, Submit | Your Python, on your machine | Python 3.12 inside the visitor's browser ([Pyodide](https://pyodide.org)), in a background worker with the same 10-second limit. Nothing runs on a server |
-| Progress and drafts | `progress.json` | The browser's storage. With the optional sync server, **Settings > Your ID** keeps it the same on every device; otherwise **Settings > Export / Import** moves it |
+| Progress and drafts | `progress.json` | The browser's storage. **Settings > Sync between devices** keeps it the same on every device (an ID on the optional sync server, or a GitHub gist); otherwise **Settings > Export / Import** moves it |
 | Tutor | `COURSE_LLM` and `.env` | Groq (`openai/gpt-oss-120b`): each visitor pastes their own key in **Settings**, or you run the optional tutor proxy so nobody needs a key |
 
 The first Run downloads Python (about 10 MB, then cached by the browser), so the hosted site needs internet access. Packages such as NumPy are downloaded the first time a program imports them.
@@ -125,6 +125,8 @@ The hosted site is public files, so it must never contain your API key, and it c
 
 - **Tutor proxy (nobody needs a key).** It keeps your Groq key as a secret. Without it, each visitor pastes their own Groq key in Settings; that key stays in their browser and is sent only to `api.groq.com`. `--build` never reads `.env`.
 - **Progress sync.** Settings asks for an ID and password. Progress is saved to that ID in Workers KV (about 30 seconds after a change, and when the tab is left), and appears on every device where you sign in. Changes made on two devices before syncing are combined. The password is turned into a key in the browser (PBKDF2), so the Worker never sees it, and it stores only a hash of that key. There is no password reset.
+
+**If a device cannot reach the Worker** (some work laptops and networks block `*.workers.dev`, and show "Could not reach the sync server" or an "Access Denied" page), use **Settings > Sync between devices > Or sync through GitHub** instead. It needs no server: the browser keeps the progress in a secret gist in your own GitHub account. Create a token at github.com/settings/tokens/new with only the **gist** box ticked, and paste it on every device (tokens from the same GitHub account find the same gist). The token stays in that browser and is sent only to `api.github.com`; **Disconnect** removes it and the progress from that browser. This option is also there when the site is built without `--sync-url`.
 
 Setup, from the `deploy` folder (needs Node.js and a free Cloudflare account):
 
