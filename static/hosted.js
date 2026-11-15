@@ -5,8 +5,6 @@
                                progress is kept in this browser's localStorage (Settings has Export and Import)
      /api/tutor                the Groq API, with the visitor's own key, or through the site's tutor proxy
    With a sync server (--sync-url), signing in with an ID and password also keeps the progress in sync between devices.
-   Without one, or where a network blocks it, the progress can instead be kept in a secret GitHub gist (Settings, with
-   the visitor's own GitHub token; the browser talks to api.github.com directly).
    It loads after course.js / python.js and before app.js / py.js. */
 (function () {
   'use strict';
@@ -53,11 +51,9 @@
     return true;
   }
 
-  /* ---------- progress sync between devices (signed in with an ID, or connected to a GitHub gist) ----------
-     Kept in localStorage under sae-sync: { id, auth, rev, dirty, adopt, at, error }, or for a gist
-     { via: 'gist', token, gist, login, id: 'gist:<gist id>', rev, dirty, adopt, at, error }.
+  /* ---------- progress sync between devices (signed in with an ID) ----------
+     Kept in localStorage under sae-sync: { id, auth, rev, dirty, adopt, at, error }.
        auth   a key made from the password in this browser (PBKDF2); the server stores only a hash of it
-       token  the visitor's GitHub token (gist scope); sent only to api.github.com
        rev    the server's revision this browser last had
        dirty  entries changed here and not yet saved to the ID, as "section" or "section\nkey" paths
        adopt  goes up when newer progress from the ID is taken in; other open tabs then reload
@@ -68,13 +64,10 @@
   var WHOLE = { streak: 1 };   // values that are replaced as a whole, never combined entry by entry
   function getSync() {
     try { var s = JSON.parse(readLocal(SYNC_STORE) || 'null'); } catch (e) { return null; }
-    if (!isObj(s)) return null;
-    if (s.via === 'gist') { if (!s.token || !s.gist) return null; }
-    else if (!SYNC || !s.id || !s.auth) return null;
+    if (!SYNC || !isObj(s) || !s.id || !s.auth) return null;
     if (!isObj(s.dirty)) s.dirty = {};
     return s;
   }
-  function label(s) { return s.via === 'gist' ? 'your GitHub gist' : 'your ID "' + s.id + '"'; }
   function setSync(s) { writeLocal(SYNC_STORE, s ? JSON.stringify(s) : null); }
   function diffPaths(a, b, into) {   // which entries differ between two progress objects
     a = isObj(a) ? a : {}; b = isObj(b) ? b : {};
@@ -115,80 +108,6 @@
       return r.json().catch(function () { return {}; }).then(function (d) { d = isObj(d) ? d : {}; d.status = r.status; return d; });
     });
   }
-
-  /* The gist holds one file, {rev, updated, data}, the same record the sync server keeps. GitHub has no
-     "save only if unchanged", so a save reads the gist first and answers 409 like the server when another device saved. */
-  var GH = 'https://api.github.com', GIST_FILE = 'course-progress.json';
-  function gh(token, method, path, body, keepalive) {
-    var opts = { method: method, cache: 'no-store', headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + token } };
-    if (body) {
-      opts.body = JSON.stringify(body); opts.headers['Content-Type'] = 'application/json';
-      if (keepalive && opts.body.length < 60000) opts.keepalive = true;
-    }
-    return fetchReal(GH + path, opts).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (d) { return { status: r.status, body: d }; });
-    });
-  }
-  function ghError(r) {
-    if (r.status === 401) return 'GitHub did not accept the token (expired or deleted?). Disconnect, then connect again with a new token.';
-    if (r.status === 403 || r.status === 404) return 'The token cannot use gists. Create one with the "gist" permission ticked.';
-    return 'GitHub answered with HTTP ' + r.status + (r.body && r.body.message ? ': ' + String(r.body.message).slice(0, 200) : '') + '.';
-  }
-  function gistRecord(rev, data) {
-    var files = {};
-    files[GIST_FILE] = { content: JSON.stringify({ rev: rev, updated: new Date().toISOString(), data: data }) };
-    return files;
-  }
-  function readGist(token, gistId) {   // answers like the server's load: { status, rev, data } or { status, error }
-    return gh(token, 'GET', '/gists/' + gistId).then(function (r) {
-      if (r.status !== 200) return { status: r.status, error: ghError(r) };
-      var f = (r.body.files || {})[GIST_FILE];
-      if (!f) return { status: 200, rev: 0, data: {} };
-      var text = f.truncated ? fetchReal(f.raw_url, { cache: 'no-store' }).then(function (x) { return x.text(); }) : Promise.resolve(f.content);
-      return text.then(function (t) {
-        var v = {}; try { v = JSON.parse(t); } catch (e) { /* damaged: start again from this browser */ }
-        v = isObj(v) ? v : {};
-        return { status: 200, rev: v.rev || 0, updated: v.updated, data: isObj(v.data) ? v.data : {} };
-      });
-    });
-  }
-  function gistCall(s, op, body, keepalive) {
-    if (op === 'load') return readGist(s.token, s.gist);
-    return readGist(s.token, s.gist).then(function (cur) {
-      if (cur.status !== 200) return cur;
-      if (cur.rev !== (body.base || 0)) return { status: 409, rev: cur.rev, data: cur.data, error: 'Another device saved first.' };
-      var rev = cur.rev + 1;
-      return gh(s.token, 'PATCH', '/gists/' + s.gist, { files: gistRecord(rev, body.data) }, keepalive).then(function (r) {
-        return r.status === 200 ? { status: 200, rev: rev } : { status: r.status, error: ghError(r) };
-      });
-    });
-  }
-  function call(s, op, body, keepalive) { return s.via === 'gist' ? gistCall(s, op, body, keepalive) : syncCall(op, body, keepalive); }
-  function connectGist(token) {   // find the course gist in this GitHub account (or create it) and sync with it from now on
-    var before = getSync();
-    return (before ? push(true).catch(function () {}) : Promise.resolve()).then(function () {
-      return gh(token, 'GET', '/gists?per_page=100');
-    }).then(function (r) {
-      if (r.status !== 200) throw new Error(ghError(r));
-      var found = (Array.isArray(r.body) ? r.body : []).filter(function (g) { return g && g.files && g.files[GIST_FILE]; })[0];
-      var local = load();
-      if (!found) {
-        return gh(token, 'POST', '/gists', { description: 'Course progress (kept in sync by the course site)', public: false, files: gistRecord(1, local) }).then(function (c) {
-          if (c.status !== 201) throw new Error(ghError(c));
-          setSync({ via: 'gist', token: token, gist: c.body.id, id: 'gist:' + c.body.id, login: (c.body.owner || {}).login || '',
-            rev: 1, dirty: {}, adopt: 0, at: Date.now(), error: '' });
-        });
-      }
-      return readGist(token, found.id).then(function (g) {
-        if (g.status !== 200) throw new Error(g.error);
-        var merged = mergeIn(g.data, local);
-        setSync({ via: 'gist', token: token, gist: found.id, id: 'gist:' + found.id, login: (found.owner || {}).login || '',
-          rev: g.rev, dirty: diffPaths(g.data, merged, {}), adopt: 0, at: Date.now(), error: '' });
-        save(merged);
-        return push(true);
-      });
-    });
-  }
   var pushing = false, pushTimer = null, lastPull = 0, tabAdopt = 0;
   function syncSoon(ms) { clearTimeout(pushTimer); pushTimer = setTimeout(push, ms === undefined ? 30000 : ms); }
   function push(keepalive) {   // save this browser's changes to the ID
@@ -196,7 +115,7 @@
     if (!s || pushing || !hasKeys(s.dirty)) return Promise.resolve();
     pushing = true; clearTimeout(pushTimer);
     var data = load();
-    return call(s, 'save', { id: s.id, auth: s.auth, base: s.rev || 0, data: data }, keepalive).then(function (r) {
+    return syncCall('save', { id: s.id, auth: s.auth, base: s.rev || 0, data: data }, keepalive).then(function (r) {
       pushing = false;
       var now = getSync();
       if (!now || now.id !== s.id) return;
@@ -209,14 +128,11 @@
       }
       if (r.status === 409 && r.rev > (now.rev || 0)) return adopt(now, r.rev, r.data);   // another device saved first
       now.error = r.error || ('HTTP ' + r.status); setSync(now); refreshAccount();
-      if (r.status !== 401 && r.status !== 403 && r.status !== 404) syncSoon(60000);
+      if (r.status !== 403 && r.status !== 404) syncSoon(60000);
     }, function () {
       pushing = false;
       var now = getSync();
-      if (now) {
-        now.error = 'Could not reach ' + (now.via === 'gist' ? 'GitHub' : 'the sync server') + '. Changes are kept here and saved later.';
-        setSync(now); refreshAccount();
-      }
+      if (now) { now.error = 'Could not reach the sync server. Changes are kept here and saved later.'; setSync(now); refreshAccount(); }
       syncSoon(60000);
     });
   }
@@ -227,14 +143,14 @@
     s.adopt = (s.adopt || 0) + 1; tabAdopt = s.adopt;
     setSync(s);
     var changed = !same(merged, local);
-    if (changed) { status('Loading your progress from ' + label(s) + '.'); save(merged); }
+    if (changed) { status('Loading your progress from your ID.'); save(merged); }
     return push(true).then(function () { if (changed) location.reload(); });
   }
   function pull() {   // fetch the ID's progress; take it in when it is newer than what this browser has
     var s = getSync();
     if (!s) return Promise.resolve();
     lastPull = Date.now();
-    return call(s, 'load', { id: s.id, auth: s.auth }).then(function (r) {
+    return syncCall('load', { id: s.id, auth: s.auth }).then(function (r) {
       var now = getSync();
       if (!now || now.id !== s.id) return;
       if (r.status !== 200) { now.error = r.error || ('HTTP ' + r.status); setSync(now); refreshAccount(); return; }
@@ -275,12 +191,10 @@
   function signOut() {
     var s = getSync();
     if (!s) return;
-    var gist = s.via === 'gist';
-    if (!confirm(gist ? 'Disconnect GitHub sync? The progress and the token in this browser are removed; the progress stays saved in your GitHub gist.'
-                      : 'Sign out of "' + s.id + '"? The progress in this browser is removed; it stays saved in your ID.')) return;
+    if (!confirm('Sign out of "' + s.id + '"? The progress in this browser is removed; it stays saved in your ID.')) return;
     push(true).catch(function () {}).then(function () {
       var now = getSync();
-      if (now && hasKeys(now.dirty) && !confirm('Some changes could not be saved to ' + label(now) + ' yet (no connection?). ' + (gist ? 'Disconnect' : 'Sign out') + ' and lose them?')) return;
+      if (now && hasKeys(now.dirty) && !confirm('Some changes could not be saved to your ID yet (no connection?). Sign out and lose them?')) return;
       setSync(null); writeLocal(STORE, null); location.reload();
     });
   }
@@ -502,7 +416,7 @@
         '<p class="hs-note">Use this only on your own device. Anyone using this browser profile could read the key.</p>';
     dlg.innerHTML =
       '<div class="hs-head"><h2 id="hs-title">Settings</h2><button type="button" class="btn sm ghost" id="hs-close">Close</button></div>' +
-      '<section><h3>Sync between devices</h3><div id="hs-account"></div></section>' +
+      (SYNC ? '<section><h3>Your ID</h3><div id="hs-account"></div></section>' : '') +
       '<section><h3>Tutor</h3>' + tutor + '</section>' +
       '<section><h3>Progress</h3><p id="hs-progress-note"></p>' +
       '<div class="hs-row"><button type="button" id="hs-export" class="btn sm">Export</button><button type="button" id="hs-import" class="btn sm">Import</button>' +
@@ -538,7 +452,7 @@
       f.text().then(function (text) {
         var data = JSON.parse(text);
         if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not a progress file');
-        var where = getSync() ? 'this browser and in ' + label(getSync()) : 'this browser';
+        var where = getSync() ? 'this browser and in your ID "' + getSync().id + '"' : 'this browser';
         if (!confirm('Replace the progress saved in ' + where + ' with the contents of ' + f.name + '?')) return;
         replaceAll(load(), data);
         return push(true).then(function () { location.reload(); });
@@ -546,7 +460,7 @@
     });
     dlg.querySelector('#hs-reset').addEventListener('click', function () {
       var s = getSync();
-      if (!confirm(s ? 'Delete all progress, drafts and solved problems in this browser and in ' + label(s) + ', on every device? Export first if you want to keep a copy.'
+      if (!confirm(s ? 'Delete all progress, drafts and solved problems in this browser and in your ID "' + s.id + '", on every device? Export first if you want to keep a copy.'
                      : 'Delete all progress, drafts and solved problems saved in this browser? Export first if you want to keep a copy.')) return;
       if (!s) { writeLocal(STORE, null); location.reload(); return; }
       replaceAll(load(), {});
@@ -559,8 +473,8 @@
   }
   function accountState(s) {
     if (s.error) return 'Not saved: ' + s.error;
-    if (hasKeys(s.dirty)) return 'Some changes are waiting to be saved to ' + label(s) + '.';
-    return s.at ? 'All progress is saved to ' + label(s) + ' (last update ' + fmtTime(s.at) + ').' : '';
+    if (hasKeys(s.dirty)) return 'Some changes are waiting to be saved to your ID.';
+    return s.at ? 'All progress is saved to your ID (last update ' + fmtTime(s.at) + ').' : '';
   }
   function refreshAccount() {   // update the status line while the dialog is open
     var s = getSync(), line = dlg && dlg.querySelector('#hs-account-state');
@@ -569,28 +483,22 @@
   function renderAccount() {
     var box = dlg && dlg.querySelector('#hs-account'), note = dlg && dlg.querySelector('#hs-progress-note');
     var s = getSync();
-    if (note) note.textContent = s ? 'Your progress and drafts are saved in this browser and to ' + label(s) + ', so they appear on every device connected to it. Export makes a file copy.'
-      : 'Your progress and drafts are saved in this browser only. Use Sync above to use them on other devices, or export them here and import the file there.';
+    if (note) note.textContent = s ? 'Your progress and drafts are saved in this browser and to your ID, so they appear on every device where you sign in. Export makes a file copy.'
+      : 'Your progress and drafts are saved in this browser only.' + (SYNC ? ' Sign in with an ID above to use them on other devices, or' : ' To continue on another device,') + ' export them here and import the file there.';
     if (!box) return;
     if (s) {
-      var gist = s.via === 'gist';
-      box.innerHTML = (gist
-          ? '<p>Syncing through a secret gist in the GitHub account' + (s.login ? ' <b>' + esc(s.login) + '</b>' : '') + '. Connect a token from the same GitHub account on another device to continue there.</p>'
-          : '<p>Signed in as <b>' + esc(s.id) + '</b>. Sign in with the same ID and password on another device to continue there.</p>') +
+      box.innerHTML = '<p>Signed in as <b>' + esc(s.id) + '</b>. Sign in with the same ID and password on another device to continue there.</p>' +
         '<p id="hs-account-state" class="hs-note" role="status"></p>' +
         '<div class="hs-row"><button type="button" id="hs-sync-now" class="btn sm">Save now</button><span class="grow"></span>' +
-        '<button type="button" id="hs-signout" class="btn sm ghost">' + (gist ? 'Disconnect' : 'Sign out') + '</button></div>' +
-        (gist ? '' : gistForm(true));
+        '<button type="button" id="hs-signout" class="btn sm ghost">Sign out</button></div>';
       refreshAccount();
       box.querySelector('#hs-sync-now').addEventListener('click', function () {
         var line = box.querySelector('#hs-account-state'); line.textContent = 'Saving...';
         pull().then(function () { return push(); }).then(refreshAccount, refreshAccount);
       });
       box.querySelector('#hs-signout').addEventListener('click', signOut);
-      if (!gist) wireGist(box);
       return;
     }
-    if (!SYNC) { box.innerHTML = gistForm(false); wireGist(box); return; }
     box.innerHTML = '<p>Sign in with an ID and password to keep the same progress on all your devices. Without one, progress stays in this browser only.</p>' +
       '<form id="hs-account-form" autocomplete="on">' +
       '<div class="hs-row"><input id="hs-id" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ID, for example kartik" aria-label="ID">' +
@@ -598,9 +506,7 @@
       '<div class="hs-row" id="hs-pw2-row" hidden><input id="hs-pw2" type="password" autocomplete="new-password" placeholder="Repeat the password" aria-label="Repeat the password"></div>' +
       '<div class="hs-row"><button type="submit" id="hs-signin" class="btn sm primary">Sign in</button><button type="button" id="hs-create" class="btn sm">Create new ID</button></div>' +
       '</form><p id="hs-account-msg" class="hs-note" role="status"></p>' +
-      '<p class="hs-note">IDs use 3 to 40 letters, digits, dots, dashes or underscores. Passwords need at least 8 characters. There is no password reset, so keep it somewhere safe.</p>' +
-      gistForm(true);
-    wireGist(box);
+      '<p class="hs-note">IDs use 3 to 40 letters, digits, dots, dashes or underscores. Passwords need at least 8 characters. There is no password reset, so keep it somewhere safe.</p>';
     var form = box.querySelector('#hs-account-form'), msg = box.querySelector('#hs-account-msg');
     var idIn = box.querySelector('#hs-id'), pwIn = box.querySelector('#hs-pw'), pw2Row = box.querySelector('#hs-pw2-row'), pw2In = box.querySelector('#hs-pw2');
     var buttons = [box.querySelector('#hs-signin'), box.querySelector('#hs-create')];
@@ -623,35 +529,6 @@
     form.addEventListener('submit', function (e) { e.preventDefault(); go(false); });
     box.querySelector('#hs-create').addEventListener('click', function () { go(true); });
   }
-  function gistForm(folded) {   // folded: shown under the ID sign-in as an alternative
-    var body =
-      '<p>Keeps your progress in a secret gist in your own GitHub account. Use it where the ID sign-in cannot reach the sync server (some work laptops block it).</p>' +
-      '<p class="hs-note">1. Create a token at <a href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Course%20progress%20sync" target="_blank" rel="noopener noreferrer">github.com/settings/tokens/new</a>: ' +
-      'tick only <b>gist</b>, pick an expiry date, and click Generate token.<br>2. Paste it here, on every device you use, with a token from the same GitHub account.</p>' +
-      '<div class="hs-row"><input id="hs-gh-token" type="password" autocomplete="off" spellcheck="false" placeholder="GitHub token (ghp_...)" aria-label="GitHub token">' +
-      '<button type="button" id="hs-gh-connect" class="btn sm primary">Connect</button></div>' +
-      '<p id="hs-gh-msg" class="hs-note" role="status"></p>' +
-      '<p class="hs-note">The token is stored only in this browser and sent only to GitHub. Anyone using this browser profile could read it; Disconnect removes it.</p>';
-    return folded ? '<details class="hs-gh"><summary>Or sync through GitHub</summary>' + body + '</details>' : body;
-  }
-  function wireGist(box) {
-    var input = box.querySelector('#hs-gh-token'), btn = box.querySelector('#hs-gh-connect'), msg = box.querySelector('#hs-gh-msg');
-    if (!input) return;
-    function go() {
-      var token = input.value.trim();
-      if (!/^[A-Za-z0-9_]{20,255}$/.test(token)) { msg.textContent = 'Paste the whole token GitHub showed you (it starts with ghp_ or github_pat_).'; input.focus(); return; }
-      btn.disabled = true; msg.textContent = 'Connecting to GitHub...';
-      connectGist(token).then(function () {
-        msg.textContent = 'Done. Loading your progress...';
-        location.reload();
-      }, function (err) {
-        btn.disabled = false;
-        msg.textContent = err && err.message && !/fetch|network/i.test(err.message) ? err.message : 'Could not reach GitHub. Check the internet connection.';
-      });
-    }
-    btn.addEventListener('click', go);
-    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
-  }
   function openSettings(focusSel) {
     if (!dlg) buildSettings();
     if (!H.proxy) keyState();
@@ -671,22 +548,24 @@
   }
 
   /* ---------- sync: start-up and keeping up with other devices and tabs ---------- */
-  var first = getSync();
-  tabAdopt = first ? first.adopt || 0 : 0;
-  if (first) pull();
-  else if (SYNC && !readLocal(ASKED)) {   // a new browser: ask for an ID once
-    writeLocal(ASKED, '1');
-    window.addEventListener('load', function () { openSettings('#hs-id'); });
+  if (SYNC) {
+    var first = getSync();
+    tabAdopt = first ? first.adopt || 0 : 0;
+    if (first) pull();
+    else if (!readLocal(ASKED)) {   // a new browser: ask for an ID once
+      writeLocal(ASKED, '1');
+      window.addEventListener('load', function () { openSettings('#hs-id'); });
+    }
+    var back = function () {
+      var s = getSync();
+      if (!s) return;
+      if ((s.adopt || 0) !== tabAdopt) { location.reload(); return; }   // another tab took in newer progress
+      if (Date.now() - lastPull > 15000) pull();
+    };
+    window.addEventListener('focus', back);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') push(true); else back();
+    });
+    window.addEventListener('pagehide', function () { push(true); });
   }
-  var back = function () {
-    var s = getSync();
-    if (!s) return;
-    if ((s.adopt || 0) !== tabAdopt) { location.reload(); return; }   // another tab took in newer progress
-    if (Date.now() - lastPull > 15000) pull();
-  };
-  window.addEventListener('focus', back);
-  document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') push(true); else back();
-  });
-  window.addEventListener('pagehide', function () { push(true); });
 })();
