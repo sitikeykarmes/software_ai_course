@@ -18,6 +18,3 @@ dialog.hs::backdrop { background: rgba(10, 12, 15, .45); }
 .hs .hs-danger { color: var(--bad); }
 .py-status { position: fixed; left: 16px; bottom: 16px; z-index: 70; max-width: calc(100vw - 32px); font-size: .84rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 8px 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, .08); }
 .py-status[hidden] { display: none; }
-.hs details.hs-gh { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
-.hs details.hs-gh summary { cursor: pointer; font-size: .88rem; font-weight: 600; margin-bottom: 8px; }
-.hs details.hs-gh a { color: var(--accent); }
